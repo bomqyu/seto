@@ -11,7 +11,7 @@ Single-user, no-login v1 — all trees live in the browser (React state +
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in ANTHROPIC_API_KEY
+cp .env.example .env.local   # then fill in GEMINI_API_KEY
 npm run dev
 ```
 
@@ -21,13 +21,16 @@ Open [http://localhost:3000](http://localhost:3000).
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | Yes | Used only server-side in Route Handlers — never exposed to the client. |
+| `GEMINI_API_KEY` | Yes | Used only server-side in Route Handlers — never exposed to the client. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey). |
 
 ## Project structure
 
 - `src/lib/ai/` — the AI-calling module: zod schema (`schema.ts`), prompt
-  builders (`prompts.ts`), and the Anthropic client + schema-validated
-  generation calls with one retry on validation failure (`generate.ts`).
+  builders (`prompts.ts`), and the Gemini client + schema-validated
+  generation calls with one retry on validation failure (`generate.ts`). The
+  JSON schema sent to the model is derived directly from the zod schema
+  (`z.toJSONSchema`), so the requested shape and the validated shape never
+  drift apart.
 - `src/lib/tree/` — the tree-state module: the zustand store (`store.ts`,
   undo/redo, locking, drag overrides, detail level), dagre auto-layout +
   deterministic category colors (`layout.ts`, `color.ts`), coverage diffing
@@ -37,7 +40,7 @@ Open [http://localhost:3000](http://localhost:3000).
   export/import.
 - `src/lib/export/png.ts` — PNG export of the React Flow canvas.
 - `src/app/api/generate-tree/` and `src/app/api/parse-pdf/` — Route Handlers;
-  the only places the Anthropic API key and `pdf-parse` are used.
+  the only places the Gemini API key and `pdf-parse` are used.
 - `src/components/` — React Flow canvas + custom node, input form, toolbar,
   framework/coaching panels, saved-trees sidebar.
 

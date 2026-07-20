@@ -1,6 +1,5 @@
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import type { z } from "zod";
-import { CASETREE_MODEL, getAnthropicClient } from "./client";
+import { z } from "zod";
+import { CASETREE_MODEL, getGeminiClient } from "./client";
 import {
   buildFollowUpGenerationPrompt,
   buildFullGenerationPrompt,
@@ -26,15 +25,7 @@ export class AIGenerationError extends Error {
   }
 }
 
-const MAX_TOKENS = 16000;
-
-function extractText(content: { type: string; text?: string }[]): string {
-  const textBlock = content.find((b) => b.type === "text" && typeof b.text === "string");
-  if (!textBlock?.text) {
-    throw new AIGenerationError("Model response contained no text content.");
-  }
-  return textBlock.text;
-}
+const MAX_OUTPUT_TOKENS = 16000;
 
 function formatZodError(error: z.ZodError): string {
   return error.issues
@@ -43,36 +34,52 @@ function formatZodError(error: z.ZodError): string {
     .join("\n");
 }
 
+interface GeminiTurn {
+  role: "user" | "model";
+  parts: { text: string }[];
+}
+
 /**
- * Calls Claude with a JSON-schema output constraint, validates the result with
- * the given zod schema, and retries once (appending the validation error to a
- * follow-up turn) if validation fails. Throws AIGenerationError if the second
- * attempt also fails — callers must never render a partial/invalid tree.
+ * Calls Gemini with a JSON-schema output constraint (derived directly from
+ * the given zod schema, so the shape we ask for and the shape we validate
+ * against never drift), validates the result, and retries once (appending
+ * the validation error as a follow-up turn) if validation fails. Throws
+ * AIGenerationError if the second attempt also fails — callers must never
+ * render a partial/invalid tree.
  */
 async function callWithSchemaRetry<S extends z.ZodType>(
   schema: S,
   userPrompt: string,
 ): Promise<z.infer<S>> {
-  const client = getAnthropicClient();
-  const format = zodOutputFormat(schema);
+  const client = getGeminiClient();
+  const responseJsonSchema = z.toJSONSchema(schema);
 
-  const messages: { role: "user" | "assistant"; content: string }[] = [
-    { role: "user", content: userPrompt },
-  ];
+  const contents: GeminiTurn[] = [{ role: "user", parts: [{ text: userPrompt }] }];
 
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const response = await client.messages.create({
+      const response = await client.models.generateContent({
         model: CASETREE_MODEL,
-        max_tokens: MAX_TOKENS,
-        system: SYSTEM_PROMPT,
-        messages,
-        output_config: { format },
+        contents,
+        config: {
+          systemInstruction: SYSTEM_PROMPT,
+          responseMimeType: "application/json",
+          responseJsonSchema,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+        },
       });
 
-      const rawText = extractText(response.content as { type: string; text?: string }[]);
+      const rawText = response.text;
+      if (!rawText) {
+        const blockReason = response.promptFeedback?.blockReason;
+        throw new Error(
+          blockReason
+            ? `The model declined to respond (${blockReason}).`
+            : "The model returned an empty response.",
+        );
+      }
 
       let parsedJson: unknown;
       try {
@@ -87,17 +94,25 @@ async function callWithSchemaRetry<S extends z.ZodType>(
       }
 
       lastError = result.error;
-      messages.push({ role: "assistant", content: rawText });
-      messages.push({
+      contents.push({ role: "model", parts: [{ text: rawText }] });
+      contents.push({
         role: "user",
-        content: `Your previous response did not match the required schema. Fix these\nvalidation errors and return a corrected, complete response (the same shape,\nnot a diff):\n${formatZodError(result.error)}`,
+        parts: [
+          {
+            text: `Your previous response did not match the required schema. Fix these\nvalidation errors and return a corrected, complete response (the same shape,\nnot a diff):\n${formatZodError(result.error)}`,
+          },
+        ],
       });
     } catch (error) {
       lastError = error;
       if (attempt === 0) {
-        messages.push({
+        contents.push({
           role: "user",
-          content: `Your previous response could not be parsed as valid JSON matching the\nrequired schema (${error instanceof Error ? error.message : String(error)}).\nPlease return a corrected, complete, valid JSON response.`,
+          parts: [
+            {
+              text: `Your previous response could not be parsed as valid JSON matching the\nrequired schema (${error instanceof Error ? error.message : String(error)}).\nPlease return a corrected, complete, valid JSON response.`,
+            },
+          ],
         });
       }
     }

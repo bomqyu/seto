@@ -101,7 +101,7 @@ export async function POST(request: Request) {
     if (error instanceof AIGenerationError) {
       return NextResponse.json({ error: error.message }, { status: 502 });
     }
-    if (error instanceof Error && error.message.includes("ANTHROPIC_API_KEY")) {
+    if (error instanceof Error && error.message.includes("GEMINI_API_KEY")) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
     console.error("generate-tree route error", error);
