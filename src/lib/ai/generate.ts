@@ -25,7 +25,7 @@ export class AIGenerationError extends Error {
   }
 }
 
-const MAX_OUTPUT_TOKENS = 16000;
+const MAX_OUTPUT_TOKENS = 32000;
 
 function formatZodError(error: z.ZodError): string {
   return error.issues
@@ -68,6 +68,14 @@ async function callWithSchemaRetry<S extends z.ZodType>(
           responseMimeType: "application/json",
           responseJsonSchema,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
+          // Extended thinking draws from the same maxOutputTokens budget as
+          // the final answer, and can silently eat most of it on a large
+          // tree - the model then gets cut off mid-JSON. Our system prompt
+          // already asks for the reasoning to be written out as real JSON
+          // fields (hypothesis, framework rationale, coaching hints), so
+          // hidden thinking tokens aren't needed here; disable them for
+          // deterministic budgeting.
+          thinkingConfig: { thinkingBudget: 0 },
         },
       });
 

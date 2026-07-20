@@ -99,6 +99,7 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     if (error instanceof AIGenerationError) {
+      console.error("generate-tree AI generation error", error.message, error.cause);
       return NextResponse.json({ error: error.message }, { status: 502 });
     }
     if (error instanceof Error && error.message.includes("GEMINI_API_KEY")) {
